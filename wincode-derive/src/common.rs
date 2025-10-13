@@ -1,12 +1,14 @@
 use {
     darling::{
         ast::{Data, Fields},
-        FromDeriveInput, FromField, FromVariant,
+        FromDeriveInput, FromField, FromVariant, Result,
     },
     proc_macro2::TokenStream,
     quote::quote,
     std::borrow::Cow,
-    syn::{parse_quote, spanned::Spanned, Generics, Ident, Member, Path, Type, Visibility},
+    syn::{
+        parse_quote, spanned::Spanned, DeriveInput, Generics, Ident, Member, Path, Type, Visibility,
+    },
 };
 
 #[derive(FromField)]
@@ -211,4 +213,28 @@ pub(crate) struct SchemaArgs {
     /// Specifies whether to generate placement initialization struct helpers on `SchemaRead` implementations.
     #[darling(default)]
     pub(crate) struct_extensions: bool,
+}
+
+/// Reject deriving on `#[repr(packed)]` types, as this is UB.
+pub(crate) fn ensure_not_repr_packed(input: &DeriveInput, trait_name: &str) -> Result<()> {
+    for attr in &input.attrs {
+        if !attr.path().is_ident("repr") {
+            continue;
+        }
+
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("packed") {
+                return Err(meta.error(format!(
+                    "`{trait_name}` cannot be derived for types annotated with `#[repr(packed)]` \
+                     or `#[repr(packed(n))]`"
+                )));
+            }
+
+            // Parse left over input for `align(n)`
+            let _ = meta.input.parse::<TokenStream>();
+
+            Ok(())
+        })?;
+    }
+    Ok(())
 }
