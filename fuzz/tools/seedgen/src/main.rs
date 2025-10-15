@@ -94,8 +94,8 @@ fn seeds() -> Vec<(String, AllTypes)> {
 }
 
 fn main() {
-    let out_win_bin = Path::new("fuzz/corpus/win_bin");
-    let out_diff = Path::new("fuzz/corpus/differential");
+    let out_win_bin = Path::new("corpus/win_bin");
+    let out_diff = Path::new("corpus/differential");
 
     let b_legacy = bincode::config::legacy().with_limit::<1_000_000>();
 
@@ -112,6 +112,6 @@ fn main() {
     }
 
     println!("✅ Seeds written to:");
-    println!("  fuzz/corpus/win_bin/");
-    println!("  fuzz/corpus/differential/");
+    println!("  corpus/win_bin/");
+    println!("  corpus/differential/");
 }
