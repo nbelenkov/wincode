@@ -16,7 +16,7 @@ wincode-derive = { path = "../wincode-derive"} # if the derive macro is separate
 solana-entry = "1.18" 
 
 [workspace]
-members = ["."]
+members = [".", "tools/seedgen"]
 
 [[bin]]
 name = "fuzz_target_1"
