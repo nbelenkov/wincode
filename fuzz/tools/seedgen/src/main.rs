@@ -102,12 +102,12 @@ fn main() {
     for (name, val) in seeds() {
         // --- bincode (legacy) ---
         let bl = bincode::encode_to_vec(&val, b_legacy).expect("bincode encode");
-        write(&out_legacy.join(format!("bincode-legacy-{}.bin", name)), &bl);
+        write(&out_win_bin.join(format!("bincode-legacy-{}.bin", name)), &bl);
         write(&out_diff.join(format!("bincode-legacy-{}.bin", name)), &bl);
 
         // --- wincode ---
         let ww = wincode::serialize(&val).expect("wincode encode");
-        write(&out_legacy.join(format!("wincode-{}.bin", name)), &ww);
+        write(&out_win_bin.join(format!("wincode-{}.bin", name)), &ww);
         write(&out_diff.join(format!("wincode-{}.bin", name)), &ww);
     }
 
