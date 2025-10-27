@@ -17,6 +17,8 @@ pub enum WriteError {
     InvalidUtf8Encoding(#[from] Utf8Error),
     #[error("Sequence length would overflow length encoding scheme: {0}")]
     LengthEncodingOverflow(&'static str),
+    #[error("Custom error: {0}")]
+    Custom(&'static str),
 }
 
 #[derive(Error, Debug, PartialEq, Eq, Clone, Copy)]
@@ -40,6 +42,8 @@ pub enum ReadError {
     LengthEncodingOverflow(&'static str),
     #[error("Invalid char lead: {0}")]
     InvalidCharLead(u8),
+    #[error("Custom error: {0}")]
+    Custom(&'static str),
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
