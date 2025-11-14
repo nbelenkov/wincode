@@ -732,6 +732,160 @@ mod tests {
     }
 
     #[test]
+    fn enum_with_tag_encoding_roundtrip() {
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq, proptest_derive::Arbitrary)]
+        #[wincode(internal, tag_encoding = "u8")]
+        enum Enum {
+            A { name: String, id: u64 },
+            B(String, Vec<u8>),
+            C,
+        }
+
+        proptest!(proptest_cfg(), |(e: Enum)| {
+            let serialized = serialize(&e).unwrap();
+            let deserialized: Enum = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, e);
+        });
+    }
+
+    #[test]
+    fn enum_with_custom_tag_roundtrip() {
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq, proptest_derive::Arbitrary)]
+        #[wincode(internal)]
+        enum Enum {
+            #[wincode(tag = 5)]
+            A { name: String, id: u64 },
+            #[wincode(tag = 8)]
+            B(String, Vec<u8>),
+            #[wincode(tag = 13)]
+            C,
+        }
+
+        proptest!(proptest_cfg(), |(e: Enum)| {
+            let serialized = serialize(&e).unwrap();
+            let deserialized: Enum = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, e);
+        });
+
+        proptest!(proptest_cfg(), |(e: Enum)| {
+            let serialized = serialize(&e).unwrap();
+            let int: u32 = match e {
+                Enum::A { .. } => 5,
+                Enum::B(..) => 8,
+                Enum::C => 13,
+            };
+            prop_assert_eq!(&int.to_le_bytes(), &serialized[..4]);
+        });
+    }
+
+    #[test]
+    fn unit_enum_with_tag_encoding_static_size() {
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq)]
+        #[wincode(internal, tag_encoding = "u8")]
+        enum Enum {
+            A,
+            B,
+            C,
+        }
+
+        assert!(matches!(
+            <Enum as SchemaWrite>::TYPE_META,
+            TypeMeta::Static {
+                size: 1,
+                zero_copy: false
+            }
+        ));
+
+        assert!(matches!(
+            <Enum as SchemaRead<'_>>::TYPE_META,
+            TypeMeta::Static {
+                size: 1,
+                zero_copy: false
+            }
+        ));
+    }
+
+    #[test]
+    fn unit_enum_with_static_size() {
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq)]
+        #[wincode(internal)]
+        enum Enum {
+            A,
+            B,
+            C,
+        }
+
+        assert!(matches!(
+            <Enum as SchemaWrite>::TYPE_META,
+            TypeMeta::Static {
+                size: 4,
+                zero_copy: false
+            }
+        ));
+
+        assert!(matches!(
+            <Enum as SchemaRead<'_>>::TYPE_META,
+            TypeMeta::Static {
+                size: 4,
+                zero_copy: false
+            }
+        ));
+    }
+
+    #[test]
+    fn enum_tag_encoding() {
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq, proptest_derive::Arbitrary)]
+        #[wincode(internal, tag_encoding = "u8")]
+        enum EnumU8 {
+            A,
+            B,
+            C,
+        }
+
+        proptest!(proptest_cfg(), |(e: EnumU8)| {
+            let serialized = serialize(&e).unwrap();
+            let int = e as u8;
+            prop_assert_eq!(&int.to_le_bytes(), &serialized[..]);
+        });
+
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq, proptest_derive::Arbitrary)]
+        #[wincode(internal, tag_encoding = "u8")]
+        enum EnumTupleU8 {
+            A(u64),
+            B(StructStatic),
+            C(StructNonStatic),
+        }
+
+        proptest!(proptest_cfg(), |(e: EnumTupleU8)| {
+            let serialized = serialize(&e).unwrap();
+            let int: u8 = match e {
+                EnumTupleU8::A(_) => 0,
+                EnumTupleU8::B(_) => 1,
+                EnumTupleU8::C(_) => 2,
+            };
+            prop_assert_eq!(&int.to_le_bytes(), &serialized[..1]);
+        });
+
+        #[derive(SchemaWrite, SchemaRead, Debug, PartialEq, proptest_derive::Arbitrary)]
+        #[wincode(internal, tag_encoding = "u8")]
+        enum EnumRecordU8 {
+            A { id: u64 },
+            B { data: StructStatic },
+            C { data: StructNonStatic },
+        }
+
+        proptest!(proptest_cfg(), |(e: EnumRecordU8)| {
+            let serialized = serialize(&e).unwrap();
+            let int: u8 = match e {
+                EnumRecordU8::A { .. } => 0,
+                EnumRecordU8::B { .. } => 1,
+                EnumRecordU8::C { .. } => 2,
+            };
+            prop_assert_eq!(&int.to_le_bytes(), &serialized[..1]);
+        });
+    }
+
+    #[test]
     fn test_phantom_data() {
         let val = PhantomData::<StructStatic>;
         let serialized = serialize(&val).unwrap();
