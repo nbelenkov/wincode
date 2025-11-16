@@ -256,7 +256,7 @@
 //!
 //! Example:
 //! ```
-//! # #[cfg(any(feature = "derive", feature = "alloc"))] {
+//! # #[cfg(all(feature = "derive", feature = "alloc"))] {
 //! use wincode::{SchemaWrite, SchemaRead};
 //!
 //! # #[derive(Debug, PartialEq, Eq)]
@@ -386,7 +386,7 @@
 //!
 //! Example:
 //! ```
-//! # #[cfg(any(feature = "derive", feature = "alloc"))] {
+//! # #[cfg(all(feature = "derive", feature = "alloc"))] {
 //! use wincode::{SchemaWrite, SchemaRead};
 //!
 //! #[derive(SchemaWrite, SchemaRead)]
