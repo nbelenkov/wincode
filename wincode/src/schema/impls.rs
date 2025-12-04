@@ -927,7 +927,7 @@ impl<'de> SchemaRead<'de> for String {
 /// and where the most optimal implementation is simply iterating over the type to write or collecting
 /// to read -- typically non-contiguous sequences like `HashMap` or `BTreeMap` (or their set variants).
 macro_rules! impl_seq {
-    ($feature: literal, $target: ident<$key: ident : $($constraint:path)|*, $value: ident>) => {
+    ($feature: literal, $target: ident<$key: ident : $($constraint:path)|*, $value: ident>, $with_capacity: expr) => {
         #[cfg(feature = $feature)]
         impl<$key, $value> SchemaWrite for $target<$key, $value>
         where
@@ -1003,21 +1003,21 @@ macro_rules! impl_seq {
                     // SAFETY: `$key::TYPE_META` and `$value::TYPE_META` specify static sizes, so `len` reads of `($key::Dst, $value::Dst)`
                     // will consume `(key_size + value_size) * len` bytes, fully consuming the trusted window.
                     let reader = &mut unsafe { reader.as_trusted_for((key_size + value_size) * len) }?;
-                    (0..len)
-                        .map(|_| {
-                            let k = $key::get(reader)?;
-                            let v = $value::get(reader)?;
-                            Ok::<_, crate::ReadError>((k, v))
-                        })
-                        .collect::<ReadResult<_>>()?
+                    let mut map = $with_capacity(len);
+                    for _ in 0..len {
+                        let k = $key::get(reader)?;
+                        let v = $value::get(reader)?;
+                        map.insert(k, v);
+                    }
+                    map
                 } else {
-                    (0..len)
-                        .map(|_| {
-                            let k = $key::get(reader)?;
-                            let v = $value::get(reader)?;
-                            Ok::<_, crate::ReadError>((k, v))
-                        })
-                        .collect::<ReadResult<_>>()?
+                    let mut map = $with_capacity(len);
+                    for _ in 0..len {
+                        let k = $key::get(reader)?;
+                        let v = $value::get(reader)?;
+                        map.insert(k, v);
+                    }
+                    map
                 };
 
                 dst.write(map);
@@ -1026,7 +1026,7 @@ macro_rules! impl_seq {
         }
     };
 
-    ($feature: literal, $target: ident <$key: ident : $($constraint:path)|*>) => {
+    ($feature: literal, $target: ident <$key: ident : $($constraint:path)|*>, $with_capacity: expr, $insert: ident) => {
         #[cfg(feature = $feature)]
         impl<$key: SchemaWrite> SchemaWrite for $target<$key>
         where
@@ -1063,14 +1063,18 @@ macro_rules! impl_seq {
                         // SAFETY: `$key::TYPE_META` specifies a static size, so `len` reads of `T::Dst`
                         // will consume `size * len` bytes, fully consuming the trusted window.
                         let reader = &mut unsafe { reader.as_trusted_for(size * len) }?;
-                        (0..len)
-                            .map(|_| $key::get(reader))
-                            .collect::<ReadResult<_>>()?
+                        let mut set = $with_capacity(len);
+                        for _ in 0..len {
+                            set.$insert($key::get(reader)?);
+                        }
+                        set
                     }
                     TypeMeta::Dynamic => {
-                        (0..len)
-                            .map(|_| $key::get(reader))
-                            .collect::<ReadResult<_>>()?
+                        let mut set = $with_capacity(len);
+                        for _ in 0..len {
+                            set.$insert($key::get(reader)?);
+                        }
+                        set
                     }
                 };
 
@@ -1081,11 +1085,11 @@ macro_rules! impl_seq {
     };
 }
 
-impl_seq! { "alloc", BTreeMap<K: Ord, V> }
-impl_seq! { "std", HashMap<K: Hash | Eq, V> }
-impl_seq! { "alloc", BTreeSet<K: Ord> }
-impl_seq! { "std", HashSet<K: Hash | Eq> }
-impl_seq! { "alloc", LinkedList<K:> }
+impl_seq! { "alloc", BTreeMap<K: Ord, V>, |_| BTreeMap::new() }
+impl_seq! { "std", HashMap<K: Hash | Eq, V>, HashMap::with_capacity }
+impl_seq! { "alloc", BTreeSet<K: Ord>, |_| BTreeSet::new(), insert }
+impl_seq! { "std", HashSet<K: Hash | Eq>, HashSet::with_capacity, insert }
+impl_seq! { "alloc", LinkedList<K:>, |_| LinkedList::new(), push_back }
 
 #[cfg(feature = "alloc")]
 impl<T> SchemaWrite for BinaryHeap<T>
