@@ -82,6 +82,19 @@ pub enum TypeMeta {
     Dynamic,
 }
 
+impl TypeMeta {
+    #[inline(always)]
+    pub(crate) const fn size_assert_zero_copy(self) -> usize {
+        match self {
+            TypeMeta::Static {
+                size,
+                zero_copy: true,
+            } => size,
+            _ => panic!("Type is not zero-copy"),
+        }
+    }
+}
+
 /// Types that can be written (serialized) to a [`Writer`].
 pub trait SchemaWrite {
     type Src: ?Sized;
@@ -128,7 +141,72 @@ pub trait SchemaRead<'de> {
 /// # Safety
 ///
 /// - The type must not have any invalid bit patterns, no layout requirements, no endianness checks, etc.
-pub unsafe trait ZeroCopy: 'static {}
+pub unsafe trait ZeroCopy: 'static {
+    /// Get a reference to a type from the given bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(all(feature = "alloc", feature = "derive"))] {
+    /// # use wincode::{SchemaWrite, SchemaRead, ZeroCopy};
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// #[derive(SchemaWrite, SchemaRead)]
+    /// #[repr(C)]
+    /// struct Data {
+    ///     bytes: [u8; 7],
+    ///     the_answer: u8,
+    /// }
+    ///
+    /// let data = Data { bytes: *b"wincode", the_answer: 42 };
+    ///
+    /// let serialized = wincode::serialize(&data).unwrap();
+    /// let data_ref = Data::from_bytes(&serialized).unwrap();
+    ///
+    /// assert_eq!(data_ref, &data);
+    /// # }
+    /// ```
+    #[inline(always)]
+    fn from_bytes<'de>(mut bytes: &'de [u8]) -> ReadResult<&'de Self>
+    where
+        Self: SchemaRead<'de, Dst = Self> + Sized,
+    {
+        <&Self as SchemaRead<'de>>::get(&mut bytes)
+    }
+
+    /// Get a mutable reference to a type from the given bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(all(feature = "alloc", feature = "derive"))] {
+    /// # use wincode::{SchemaWrite, SchemaRead, ZeroCopy};
+    /// # #[derive(Debug, PartialEq, Eq)]
+    /// #[derive(SchemaWrite, SchemaRead)]
+    /// #[repr(C)]
+    /// struct Data {
+    ///     bytes: [u8; 7],
+    ///     the_answer: u8,
+    /// }
+    ///
+    /// let data = Data { bytes: [0; 7], the_answer: 0 };
+    ///
+    /// let mut serialized = wincode::serialize(&data).unwrap();
+    /// let data_mut = Data::from_bytes_mut(&mut serialized).unwrap();
+    /// data_mut.bytes = *b"wincode";
+    /// data_mut.the_answer = 42;
+    ///
+    /// let deserialized: Data = wincode::deserialize(&serialized).unwrap();
+    /// assert_eq!(deserialized, Data { bytes: *b"wincode", the_answer: 42 });
+    /// # }
+    /// ```
+    #[inline(always)]
+    fn from_bytes_mut<'de>(mut bytes: &'de mut [u8]) -> ReadResult<&'de mut Self>
+    where
+        Self: SchemaRead<'de, Dst = Self> + Sized,
+    {
+        <&mut Self as SchemaRead<'de>>::get(&mut bytes)
+    }
+}
 
 /// A type that can be read (deserialized) from a [`Reader`] without borrowing from it.
 pub trait SchemaReadOwned: for<'de> SchemaRead<'de> {}
@@ -233,12 +311,12 @@ mod tests {
     use {
         crate::{
             containers::{self, Elem, Pod},
-            deserialize,
+            deserialize, deserialize_mut,
             error::{self, invalid_tag_encoding},
             io::{Reader, Writer},
             proptest_config::proptest_cfg,
             serialize, Deserialize, ReadResult, SchemaRead, SchemaWrite, Serialize, TypeMeta,
-            WriteResult,
+            WriteResult, ZeroCopy,
         },
         core::{marker::PhantomData, ptr},
         proptest::prelude::*,
@@ -246,6 +324,7 @@ mod tests {
             cell::Cell,
             collections::{BinaryHeap, VecDeque},
             mem::MaybeUninit,
+            ops::{Deref, DerefMut},
             rc::Rc,
             result::Result,
             sync::Arc,
@@ -265,6 +344,8 @@ mod tests {
         SchemaRead,
         proptest_derive::Arbitrary,
         Hash,
+        Clone,
+        Copy,
     )]
     #[wincode(internal)]
     #[repr(C)]
@@ -297,6 +378,8 @@ mod tests {
         SchemaRead,
         proptest_derive::Arbitrary,
         Hash,
+        Clone,
+        Copy,
     )]
     #[wincode(internal)]
     #[repr(C)]
@@ -2523,6 +2606,112 @@ mod tests {
             let bincode_deserialized: Result<u64, u32> = bincode::deserialize(&bincode_serialized).unwrap();
             prop_assert_eq!(&value, &wincode_deserialized);
             prop_assert_eq!(wincode_deserialized, bincode_deserialized);
+        });
+    }
+
+    /// A buffer containing a single instance of type `T`,
+    /// aligned for `T`.
+    ///
+    /// Implements [`Deref`] and [`DerefMut`] for `[u8]` such that it
+    /// acts like a typical byte buffer, but aligned for `T`.
+    struct BufAligned<T> {
+        buf: Box<[T]>,
+    }
+
+    impl<T> Deref for BufAligned<T>
+    where
+        T: ZeroCopy,
+    {
+        type Target = [u8];
+
+        fn deref(&self) -> &Self::Target {
+            unsafe {
+                core::slice::from_raw_parts(
+                    self.buf.as_ptr() as *const u8,
+                    self.buf.len() * size_of::<T>(),
+                )
+            }
+        }
+    }
+
+    impl<T> DerefMut for BufAligned<T>
+    where
+        T: ZeroCopy,
+    {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            unsafe {
+                core::slice::from_raw_parts_mut(
+                    self.buf.as_mut_ptr() as *mut u8,
+                    self.buf.len() * size_of::<T>(),
+                )
+            }
+        }
+    }
+
+    /// Serialize a single instance of type `T` into a buffer aligned for `T`.
+    fn serialize_aligned<T>(src: &T) -> WriteResult<BufAligned<T>>
+    where
+        T: SchemaWrite<Src = T> + ZeroCopy,
+    {
+        assert_eq!(T::size_of(src)?, size_of::<T>());
+        let mut b: Box<[MaybeUninit<T>]> = Box::new_uninit_slice(1);
+        let mut buf =
+            unsafe { core::slice::from_raw_parts_mut(b.as_mut_ptr() as *mut u8, size_of::<T>()) };
+        crate::serialize_into(&mut buf, src)?;
+        Ok(BufAligned {
+            buf: unsafe { b.assume_init() },
+        })
+    }
+
+    #[test]
+    fn test_zero_copy_mut_roundrip() {
+        proptest!(proptest_cfg(), |(data: StructZeroCopy, data_rand: StructZeroCopy)| {
+            let mut serialized = serialize_aligned(&data).unwrap();
+            let deserialized: StructZeroCopy = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, data);
+
+
+            // Mutate the serialized data in place
+            {
+                let ref_mut = StructZeroCopy::from_bytes_mut(&mut serialized).unwrap();
+                *ref_mut = data_rand;
+            }
+            // Deserialize again on the same serialized data to
+            // verify the changes were persisted
+            let deserialized: StructZeroCopy = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, data_rand);
+        });
+    }
+
+    #[test]
+    fn test_deserialize_mut_roundrip() {
+        proptest!(proptest_cfg(), |(data: StructZeroCopy, data_rand: StructZeroCopy)| {
+            let mut serialized = serialize_aligned(&data).unwrap();
+            let deserialized: StructZeroCopy = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, data);
+
+
+            // Mutate the serialized data in place
+            {
+                let ref_mut: &mut StructZeroCopy = deserialize_mut(&mut serialized).unwrap();
+                *ref_mut = data_rand;
+            }
+            // Deserialize again on the same serialized data to
+            // verify the changes were persisted
+            let deserialized: StructZeroCopy = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, data_rand);
+        });
+    }
+
+    #[test]
+    fn test_zero_copy_deserialize_ref() {
+        proptest!(proptest_cfg(), |(data: StructZeroCopy)| {
+            let serialized = serialize_aligned(&data).unwrap();
+            let deserialized: StructZeroCopy = deserialize(&serialized).unwrap();
+            prop_assert_eq!(deserialized, data);
+
+            let ref_data = StructZeroCopy::from_bytes(&serialized).unwrap();
+            prop_assert_eq!(ref_data, &data);
         });
     }
 }
