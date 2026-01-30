@@ -36,7 +36,7 @@ cargo bench --features derive
 
 Release `v0.1.2` is currently undergoing 3 independent security reviews with the following firms:
 - Neodyme
-- OtterSec
+- [OtterSec](audits/wincode_ottersec_audit_0.1.2.pdf.pdf)
 - Asymmetric Research
 
 Reports will be added to the repo once completed.
