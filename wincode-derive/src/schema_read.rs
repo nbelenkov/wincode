@@ -61,12 +61,20 @@ fn impl_struct(
             } else {
                 quote! { *init_count += 1; }
             };
-            quote! {
-                <#target as SchemaRead<'de, WincodeConfig>>::read(
-                    reader,
-                    unsafe { &mut *(&raw mut (*dst_ptr).#ident).cast::<#hint>() }
-                )?;
-                #init_count
+            if let Some(mode) = &field.skip {
+                let val = mode.default_val_token_stream();
+                quote! {
+                    unsafe { (&raw mut (*dst_ptr).#ident).write(#val); }
+                    #init_count
+                }
+            } else {
+                quote! {
+                    <#target as SchemaRead<'de, WincodeConfig>>::read(
+                        reader,
+                        unsafe { &mut *(&raw mut (*dst_ptr).#ident).cast::<#hint>() }
+                    )?;
+                    #init_count
+                }
             }
         })
         .collect::<Vec<_>>();
@@ -473,10 +481,8 @@ fn impl_enum(
         match fields.style {
             style @ (Style::Struct | Style::Tuple) => {
                 // No prefix disambiguation needed, as we are matching on a discriminant integer.
-                let idents = fields.enum_member_ident_iter(None).collect::<Vec<_>>();
-                let read = fields
-                    .iter()
-                    .zip(&idents)
+                let mut construct_idents = Vec::with_capacity(fields.len());
+                let read = fields.enum_members_iter(None)
                     .map(|(field, ident)| {
                         let target = field.target_resolved().with_lifetime("de");
 
@@ -487,26 +493,33 @@ fn impl_enum(
                         // a macro-generated shadowed enum that wraps all variant fields with `MaybeUninit`, which
                         // could be used to facilitate direct reads. The user would have to guarantee layout on
                         // their type (a la `#[repr(C)]`), or roll the dice on non-guaranteed layout -- so it would need to be opt-in.
-                        quote! {
-                            let #ident = <#target as SchemaRead<'de, WincodeConfig>>::get(reader)?;
-                        }
+                        let read = if let Some(mode) = &field.skip {
+                            let val = mode.default_val_token_stream();
+                            quote! { let #ident = #val; }
+                        } else {
+                            quote! {
+                                let #ident = <#target as SchemaRead<'de, WincodeConfig>>::get(reader)?;
+                            }
+                        };
+                        construct_idents.push(ident);
+                        read
                     })
                     .collect::<Vec<_>>();
 
                 // No prefix disambiguation needed, as we are matching on a discriminant integer.
-                let static_anon_idents = fields.member_anon_ident_iter(None).collect::<Vec<_>>();
-                let static_targets = fields.iter().map(|field| {
+                let static_anon_idents = fields.unskipped_anon_ident_iter(None).collect::<Vec<_>>();
+                let static_targets = fields.unskipped_iter().map(|field| {
                     let target = field.target_resolved().with_lifetime("de");
                     quote! {<#target as SchemaRead<'de, WincodeConfig>>::TYPE_META}
                 });
 
                 let constructor = if style.is_struct() {
                     quote! {
-                        #enum_ident::#variant_ident{#(#idents),*}
+                        #enum_ident::#variant_ident{#(#construct_idents),*}
                     }
                 } else {
                     quote! {
-                        #enum_ident::#variant_ident(#(#idents),*)
+                        #enum_ident::#variant_ident(#(#construct_idents),*)
                     }
                 };
 
