@@ -1534,19 +1534,34 @@ where
     }
 }
 
-const DURATION_SIZE: usize = size_of::<u64>() + size_of::<u32>();
-
 unsafe impl<C: ConfigCore> SchemaWrite<C> for Duration {
     type Src = Duration;
 
-    const TYPE_META: TypeMeta = TypeMeta::Static {
-        size: DURATION_SIZE,
-        zero_copy: false,
+    const TYPE_META: TypeMeta = match (
+        <u64 as SchemaWrite<C>>::TYPE_META,
+        <u32 as SchemaWrite<C>>::TYPE_META,
+    ) {
+        // both static
+        (TypeMeta::Static { size: u64_size, .. }, TypeMeta::Static { size: u32_size, .. }) => {
+            TypeMeta::Static {
+                size: u64_size + u32_size,
+                zero_copy: false,
+            }
+        }
+        _ => TypeMeta::Dynamic,
     };
 
     #[inline]
-    fn size_of(_src: &Self::Src) -> WriteResult<usize> {
-        Ok(DURATION_SIZE)
+    #[allow(clippy::arithmetic_side_effects)]
+    fn size_of(src: &Self::Src) -> WriteResult<usize> {
+        match <Self as SchemaWrite<C>>::TYPE_META {
+            TypeMeta::Static { size, .. } => Ok(size),
+            TypeMeta::Dynamic => {
+                let secs = <u64 as SchemaWrite<C>>::size_of(&src.as_secs())?;
+                let nanos = <u32 as SchemaWrite<C>>::size_of(&src.subsec_nanos())?;
+                Ok(secs + nanos)
+            }
+        }
     }
 
     #[inline]
@@ -1560,10 +1575,7 @@ unsafe impl<C: ConfigCore> SchemaWrite<C> for Duration {
 unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for Duration {
     type Dst = Duration;
 
-    const TYPE_META: TypeMeta = TypeMeta::Static {
-        size: DURATION_SIZE,
-        zero_copy: false,
-    };
+    const TYPE_META: TypeMeta = <Duration as SchemaWrite<C>>::TYPE_META;
 
     #[inline]
     fn read(reader: &mut impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
@@ -1581,14 +1593,19 @@ unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for Duration {
 unsafe impl<C: ConfigCore> SchemaWrite<C> for SystemTime {
     type Src = SystemTime;
 
-    const TYPE_META: TypeMeta = TypeMeta::Static {
-        size: DURATION_SIZE,
-        zero_copy: false,
-    };
+    const TYPE_META: TypeMeta = <Duration as SchemaWrite<C>>::TYPE_META;
 
     #[inline]
-    fn size_of(_src: &Self::Src) -> WriteResult<usize> {
-        Ok(DURATION_SIZE)
+    fn size_of(src: &Self::Src) -> WriteResult<usize> {
+        match <Self as SchemaWrite<C>>::TYPE_META {
+            TypeMeta::Static { size, .. } => Ok(size),
+            TypeMeta::Dynamic => {
+                let duration = src.duration_since(UNIX_EPOCH).map_err(|_| {
+                    crate::error::WriteError::Custom("SystemTime before UNIX_EPOCH")
+                })?;
+                <Duration as SchemaWrite<C>>::size_of(&duration)
+            }
+        }
     }
 
     #[inline]
@@ -1605,10 +1622,7 @@ unsafe impl<C: ConfigCore> SchemaWrite<C> for SystemTime {
 unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for SystemTime {
     type Dst = SystemTime;
 
-    const TYPE_META: TypeMeta = TypeMeta::Static {
-        size: DURATION_SIZE,
-        zero_copy: false,
-    };
+    const TYPE_META: TypeMeta = <Duration as SchemaRead<'de, C>>::TYPE_META;
 
     #[inline]
     fn read(reader: &mut impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
