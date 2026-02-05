@@ -429,6 +429,10 @@ mod tests {
             collections::{BinaryHeap, VecDeque},
             mem::MaybeUninit,
             net::{IpAddr, Ipv4Addr, Ipv6Addr},
+            num::{
+                NonZeroI128, NonZeroI16, NonZeroI32, NonZeroI64, NonZeroI8, NonZeroIsize,
+                NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
+            },
             ops::{Deref, DerefMut},
             rc::Rc,
             result::Result,
@@ -3445,6 +3449,92 @@ mod tests {
 
         let result: ReadResult<SystemTime> = deserialize(&bytes);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_nonzero_types() {
+        proptest!(proptest_cfg(), |(
+            nz_u8: NonZeroU8,
+            nz_u16: NonZeroU16,
+            nz_u32: NonZeroU32,
+            nz_u64: NonZeroU64,
+            nz_u128: NonZeroU128,
+            nz_usize: NonZeroUsize,
+            nz_i8: NonZeroI8,
+            nz_i16: NonZeroI16,
+            nz_i32: NonZeroI32,
+            nz_i64: NonZeroI64,
+            nz_i128: NonZeroI128,
+            nz_isize: NonZeroIsize,
+        )| {
+            // Unsigned
+            let ser = serialize(&nz_u8).unwrap();
+            let de: NonZeroU8 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_u8, de);
+
+            let ser = serialize(&nz_u16).unwrap();
+            let de: NonZeroU16 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_u16, de);
+
+            let ser = serialize(&nz_u32).unwrap();
+            let de: NonZeroU32 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_u32, de);
+
+            let ser = serialize(&nz_u64).unwrap();
+            let de: NonZeroU64 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_u64, de);
+
+            let ser = serialize(&nz_u128).unwrap();
+            let de: NonZeroU128 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_u128, de);
+
+            let ser = serialize(&nz_usize).unwrap();
+            let de: NonZeroUsize = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_usize, de);
+
+            // Signed
+            let ser = serialize(&nz_i8).unwrap();
+            let de: NonZeroI8 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_i8, de);
+
+            let ser = serialize(&nz_i16).unwrap();
+            let de: NonZeroI16 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_i16, de);
+
+            let ser = serialize(&nz_i32).unwrap();
+            let de: NonZeroI32 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_i32, de);
+
+            let ser = serialize(&nz_i64).unwrap();
+            let de: NonZeroI64 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_i64, de);
+
+            let ser = serialize(&nz_i128).unwrap();
+            let de: NonZeroI128 = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_i128, de);
+
+            let ser = serialize(&nz_isize).unwrap();
+            let de: NonZeroIsize = deserialize(&ser).unwrap();
+            prop_assert_eq!(nz_isize, de);
+        });
+    }
+
+    #[test]
+    fn test_nonzero_invalid_zero_value() {
+        // Test that deserializing a zero value fails
+        let zero_bytes = serialize(&0u32).unwrap();
+        let result: ReadResult<NonZeroU32> = deserialize(&zero_bytes);
+        assert!(
+            result.is_err(),
+            "Deserializing zero should fail for NonZeroU32"
+        );
+
+        let zero_bytes = serialize(&0u64).unwrap();
+        let result: ReadResult<NonZeroU64> = deserialize(&zero_bytes);
+        assert!(
+            result.is_err(),
+            "Deserializing zero should fail for NonZeroU64"
+        );
     }
 
     #[test]
