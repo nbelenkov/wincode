@@ -349,30 +349,56 @@ unsafe impl<'de, C: ConfigCore> SchemaRead<'de, C> for char {
 
     #[inline]
     fn read(mut reader: impl Reader<'de>, dst: &mut MaybeUninit<Self::Dst>) -> ReadResult<()> {
-        let b0 = *reader.peek()?;
+        use crate::error::ReadError;
 
-        let len = match b0 {
-            0x00..=0x7F => 1,
-            0xC2..=0xDF => 2,
-            0xE0..=0xEF => 3,
-            0xF0..=0xF4 => 4,
+        // We re-validate with from_utf8 only on error path to get proper Utf8Error.
+        #[cold]
+        fn utf8_error(buf: &[u8]) -> ReadError {
+            invalid_utf8_encoding(core::str::from_utf8(buf).unwrap_err())
+        }
+        let b0 = *reader.peek()?;
+        let code_point = match b0 {
+            0x00..=0x7F => {
+                unsafe { reader.consume_unchecked(1) };
+                dst.write(b0 as char);
+                return Ok(());
+            }
+            0xC2..=0xDF => {
+                let [b0, b1] = reader.take_array()?;
+                // Validate continuation byte (must be 10xxxxxx)
+                if (b1 & 0xC0) != 0x80 {
+                    return Err(utf8_error(&[b0, b1]));
+                }
+                ((b0 & 0x1F) as u32) << 6 | ((b1 & 0x3F) as u32)
+            }
+            0xE0..=0xEF => {
+                let [b0, b1, b2] = reader.take_array()?;
+                if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 {
+                    return Err(utf8_error(&[b0, b1, b2]));
+                }
+                // Check for overlong encodings (< U+0800) and surrogates (U+D800..U+DFFF)
+                if (b0 == 0xE0 && b1 < 0xA0) || (b0 == 0xED && b1 >= 0xA0) {
+                    return Err(utf8_error(&[b0, b1, b2]));
+                }
+                ((b0 & 0x0F) as u32) << 12 | ((b1 & 0x3F) as u32) << 6 | ((b2 & 0x3F) as u32)
+            }
+            0xF0..=0xF4 => {
+                let [b0, b1, b2, b3] = reader.take_array()?;
+                if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
+                    return Err(utf8_error(&[b0, b1, b2, b3]));
+                }
+                if (b0 == 0xF0 && b1 < 0x90) || (b0 == 0xF4 && b1 > 0x8F) {
+                    return Err(utf8_error(&[b0, b1, b2, b3]));
+                }
+                ((b0 & 0x07) as u32) << 18
+                    | ((b1 & 0x3F) as u32) << 12
+                    | ((b2 & 0x3F) as u32) << 6
+                    | ((b3 & 0x3F) as u32)
+            }
             _ => return Err(invalid_char_lead(b0)),
         };
 
-        if len == 1 {
-            unsafe { reader.consume_unchecked(1) };
-            dst.write(b0 as char);
-            return Ok(());
-        }
-
-        let buf = reader.fill_exact(len)?;
-        // TODO: Could implement a manual decoder that avoids UTF-8 validate + chars()
-        // and instead performs the UTF-8 validity checks and produces a `char` directly.
-        // Some quick micro-benchmarking revealed a roughly 2x speedup is possible,
-        // but this is on the order of a 1-2ns/byte delta.
-        let str = core::str::from_utf8(buf).map_err(invalid_utf8_encoding)?;
-        let c = str.chars().next().unwrap();
-        unsafe { reader.consume_unchecked(len) };
+        let c = char::from_u32(code_point).ok_or(ReadError::InvalidUtf8Code(code_point))?;
         dst.write(c);
         Ok(())
     }
