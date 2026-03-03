@@ -168,7 +168,10 @@ fn impl_enum(
     tag_encoding_override: Option<&Type>,
 ) -> (TokenStream, TokenStream) {
     if variants.is_empty() {
-        return (quote! {Ok(())}, quote! {TypeMeta::Dynamic});
+        return (
+            quote! { return Err(error::invalid_value("cannot deserialize uninhabited enum")); },
+            quote! { TypeMeta::Dynamic },
+        );
     }
 
     let type_meta_impl = variants.type_meta_impl(
