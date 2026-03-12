@@ -64,7 +64,11 @@ use {
         io::{Reader, Writer},
         schema::{SchemaRead, SchemaWrite},
     },
-    core::{marker::PhantomData, mem::MaybeUninit, ptr},
+    core::{
+        marker::PhantomData,
+        mem::{self, MaybeUninit},
+        ptr,
+    },
 };
 #[cfg(feature = "alloc")]
 use {
@@ -75,7 +79,6 @@ use {
         },
     },
     alloc::{boxed::Box as AllocBox, collections, rc::Rc as AllocRc, sync::Arc as AllocArc, vec},
-    core::mem,
 };
 
 /// A [`Vec`](std::vec::Vec) with a customizable length encoding.
@@ -588,6 +591,7 @@ where
 /// # Examples
 ///
 /// ```
+/// # #[cfg(feature = "alloc")] {
 /// # use wincode::containers::decode_into_slice_t;
 /// # use wincode::config::DefaultConfig;
 /// # type C = DefaultConfig;
@@ -605,9 +609,11 @@ where
 /// unsafe { dst.set_len(6) }
 ///
 /// assert_eq!(dst, data);
+/// # }
 /// ```
 ///
 /// ```
+/// # #[cfg(feature = "alloc")] {
 /// # use wincode::containers::decode_into_slice_t;
 /// # use wincode::config::DefaultConfig;
 /// # type C = DefaultConfig;
@@ -623,6 +629,7 @@ where
 ///
 /// // Only 6 elements were serialized.
 /// assert!(result.is_err());
+/// # }
 /// ```
 #[inline]
 pub fn decode_into_slice_t<'de, T, C>(
