@@ -621,3 +621,5 @@ pub mod std_write;
 #[cfg(feature = "alloc")]
 mod vec;
 pub use cursor::Cursor;
+#[cfg(test)]
+pub(crate) mod test_util;
